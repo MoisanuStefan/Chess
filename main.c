@@ -42,8 +42,59 @@ char * conv_addr (struct sockaddr_in address)
     return (str);
 }
 
+
+void SendFd(int socket, int fd)  // send fd by socket
+{
+    struct msghdr msg = { 0 };
+    char buf[CMSG_SPACE(sizeof(fd))];
+    memset(buf, '\0', sizeof(buf));
+    struct iovec io = { .iov_base = "ABC", .iov_len = 3 };
+
+    msg.msg_iov = &io;
+    msg.msg_iovlen = 1;
+    msg.msg_control = buf;
+    msg.msg_controllen = sizeof(buf);
+
+    struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
+
+    *((int *) CMSG_DATA(cmsg)) = fd;
+
+    msg.msg_controllen = CMSG_SPACE(sizeof(fd));
+
+    if (sendmsg(socket, &msg, 0) < 0)
+        perror("Failed to send message\n");
+}
+
+
+int ReceiveFd(int socket)  // receive fd from socket
+{
+    struct msghdr msg = {0};
+
+    char m_buffer[256];
+    struct iovec io = { .iov_base = m_buffer, .iov_len = sizeof(m_buffer) };
+    msg.msg_iov = &io;
+    msg.msg_iovlen = 1;
+
+    char c_buffer[256];
+    msg.msg_control = c_buffer;
+    msg.msg_controllen = sizeof(c_buffer);
+
+    if (recvmsg(socket, &msg, 0) < 0)
+        perror("Failed to receive message\n");
+
+    struct cmsghdr * cmsg = CMSG_FIRSTHDR(&msg);
+
+    unsigned char * data = CMSG_DATA(cmsg);
+
+    int fd = *((int*) data);
+
+    return fd;
+}
 /* programul */
-void sayHello(int);
+
 int main ()
 {
     struct sockaddr_in server;	/* structurile pentru server si clienti */
@@ -57,10 +108,10 @@ int main ()
     pid_t pid = 1;			   //parcurgerea listelor de descriptori
     int nfds;			/* numarul maxim de descriptori */
     int len;			/* lungimea structurii sockaddr_in */
-    bool waitingForOpponent;
+
 
     struct {
-        int player1_fd, player2_fd, pipe[2];
+        int player1_fd, player2_fd, pipe[2], socket[2];
 
     }child_fd[20];
 
@@ -166,6 +217,10 @@ int main ()
                     perror("Error at creating pipe\n");
                     return errno;
                 }
+                if (socketpair(AF_UNIX, SOCK_DGRAM, 0, child_fd[nrOfChilds].socket) != 0) {
+                    perror("Failed to create Unix-domain socket pair\n");
+                    return errno;
+                }
 
                 if (-1 == (pid = fork())) {
                     perror("Error at fork.\n");
@@ -174,11 +229,12 @@ int main ()
                 if (pid == 0) {     // [child that handles a chess match]
                     /* child only needs it's own information from the struct so I will create local variables*/
                     int p[] = {child_fd[nrOfChilds].pipe[0], child_fd[nrOfChilds].pipe[1]},
-                            player1_fd = child_fd[nrOfChilds].player1_fd,
-                            player2_fd = child_fd[nrOfChilds].player2_fd;
+                        s[] = {child_fd[nrOfChilds].socket[0], child_fd[nrOfChilds].socket[1]},
+                        player1_fd = child_fd[nrOfChilds].player1_fd,
+                        player2_fd = child_fd[nrOfChilds].player2_fd;
                     int infoFromPipe;
                     char msgrasp[20]=" ";
-                    printf("pipe: %d %d", p[0],p[1]);
+                    //printf("pipe: %d %d", p[0],p[1]);
                     fflush(stdout);
                     while(1)
                     {
@@ -187,16 +243,12 @@ int main ()
                             perror("Error at reading from pipe\n");
                             return errno;
                         }
-                        printf("--%d--", infoFromPipe);
+                        //printf("--%d--", infoFromPipe);
                         fflush(stdout);
                         if (infoFromPipe == 1) {      // means there is a fd for player2 coming
 
-                            if (-1 == read(p[0], &player2_fd, sizeof(int)))
-                            {
-                                perror("Error at reading from pipe\n");
-                                return errno;
-                            }
-                            printf("\np2 fd:%d\n", player2_fd);
+                            player2_fd = ReceiveFd(s[0]);
+                            //printf("\np2 fd:%d\n", player2_fd);
                             fflush(stdout);
                         }
 
@@ -209,8 +261,8 @@ int main ()
                                 perror("Error at reading from pipe\n");
                                 return errno;
                             }
-                            printf("player:%d\n",player);
-                            fflush(stdout);
+                            //printf("player:%d\n",player);
+                            //fflush(stdout);
                             if ( player == 1){
                                 int nameOrMove;
                                 if (-1 == read(p[0], &nameOrMove, sizeof(int)))     // reading the name or move int
@@ -218,8 +270,8 @@ int main ()
                                     perror("Error at reading from pipe\n");
                                     return errno;
                                 }
-                                printf("nameormove:%d\n",nameOrMove);
-                                fflush(stdout);
+                                //printf("nameormove:%d\n",nameOrMove);
+                                //fflush(stdout);
                                 if (nameOrMove == 0) {         // name
                                     int bytesRead, playerNameLen = 0;
                                     char playerName[20],c;
@@ -236,8 +288,8 @@ int main ()
                                         return errno;
                                     }
 
-                                    printf("Playername: %s\n", playerName);
-                                    fflush(stdout);
+                                    //printf("Playername: %s\n", playerName);
+                                    //fflush(stdout);
                                     //mesaj de raspuns pentru client
 
                                     bzero(msgrasp, sizeof(msgrasp));
@@ -246,7 +298,8 @@ int main ()
 
                                     printf("[server]Trimitem mesajul inapoi...%s\n",msgrasp);
                                     fflush(stdout);
-                                    if(-1 == write(player1_fd, msgrasp, sizeof(msgrasp)))
+                                    playerNameLen = strlen(msgrasp);
+                                    if(-1 == write(player1_fd, msgrasp, playerNameLen))
                                     {
                                         perror("Error at writing to player1");
                                         return errno;
@@ -264,8 +317,8 @@ int main ()
                                     perror("Error at reading from pipe\n");
                                     return errno;
                                 }
-                                printf("nameormove:%d\n",nameOrMove);
-                                fflush(stdout);
+                                //printf("nameormove:%d\n",nameOrMove);
+                                //fflush(stdout);
                                 if (nameOrMove == 0) {         // name
                                     int bytesRead, playerNameLen = 0;
                                     char playerName[20],c;
@@ -282,8 +335,8 @@ int main ()
                                         return errno;
                                     }
 
-                                    printf("Playername: %s\n", playerName);
-                                    fflush(stdout);
+                                    //printf("Playername: %s\n", playerName);
+                                    //fflush(stdout);
                                     //mesaj de raspuns pentru client
 
                                     bzero(msgrasp, sizeof(msgrasp));
@@ -292,15 +345,15 @@ int main ()
 
                                     printf("[server]Trimitem mesajul inapoi...%s\n",msgrasp);
                                     fflush(stdout);
-                                    printf("p2fd: %d\n", player2_fd);
-                                    fflush(stdout);
-                                    playerNameLen = strlen(playerName);
-                                    if(-1 == write(player2_fd, playerName, playerNameLen))
+                                    //printf("p2fd: %d\n", player2_fd);
+                                    //fflush(stdout);
+                                    playerNameLen = strlen(msgrasp);
+                                    if(-1 == write(player2_fd, msgrasp, playerNameLen))
                                     {
                                         perror("Error at writing to player1");
                                         return errno;
                                     }
-                                    printf("Player name sent\n");
+                                    printf("[server] Player name sent\n");
                                     fflush(stdout);
 
                                 }
@@ -333,11 +386,7 @@ int main ()
                         perror("Error at writing in pipe\n");
                         return errno;
                     }
-                    if (-1 == write(child_fd[nrOfChilds-1].pipe[1], &client, sizeof(int)))       //sending player2 socket descriptor to it's child process handler
-                    {
-                        perror("Error at writing in pipe\n");
-                        return errno;
-                    }
+                    SendFd(child_fd[nrOfChilds - 1].socket[1], client);
                     child_fd[nrOfChilds-1].player2_fd = client;       //adding it to struct so the parent knows both players associated to each child process
                 }
             }
@@ -392,6 +441,10 @@ int main ()
                                     return errno;
                                 }
 
+
+
+                            }
+                            else{
 
 
                             }
