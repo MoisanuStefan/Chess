@@ -93,6 +93,153 @@ int ReceiveFd(int socket)  // receive fd from socket
 
     return fd;
 }
+
+void InitializeBoard(char b[10][10]){
+    int i,j;
+    for (i = 0;i <= 9; ++i)     // borders
+    {
+        b[0][i] = '\0';
+        b[9][i] = '\0';
+        b[i][0] = '\0';
+        b[i][9] = '\0';
+    }
+
+    for (i=2; i<8; ++i)
+        for(j=1;j<9;++j)
+        {
+            if (i == 2)
+                b[i][j] = 'P';  //PION
+            else if (i == 7)
+                b[i][j] = 'p';  //pion
+            else
+                b[i][j] = 'z';  // empty slot
+        }
+    b[1][1] = b[1][8] = 'R';    //ROOK
+    b[8][1] = b[8][8] = 'r';
+    b[1][2] = b[1][7] = 'H';    //HORSE( KNIGHT, k taken by king)
+    b[8][2] = b[8][7] = 'h';
+    b[1][3] = b[1][6] = 'B';    //BISHOP
+    b[8][3] = b[8][6] = 'b';
+    b[1][4] = 'Q';              //QUEEN
+    b[8][4] = 'q';
+    b[1][5] = 'K';              //KING
+    b[8][5] = 'k';
+
+}
+
+void PrintBoard(char b[10][10]){
+    int i,j;
+    for (i=0; i<10; ++i) {
+        for (j = 0; j < 10; ++j)
+            printf("%c", b[i][j]);
+        printf("\n");
+    }
+}
+
+bool CheckLine (char board [10][10], int i, int j0, int j){
+    int c;
+    for (c = j0 + 1; c < j; ++c)
+        if (board[i][c] != 'z')
+            return true;
+    for (c = j0 - 1; c > j; c--)
+        if (board[i][c] != 'z')
+            return true;
+    return false;
+
+}
+bool CheckColumn (char board [10][10], int j, int i0, int i) {
+    int c;
+    for (c = i0 + 1; c < i; ++c)
+        if (board[c][j] != 'z')
+            return true;
+    for (c = i0 - 1; c > i; c--)
+        if (board[c][j] != 'z')
+            return true;
+    return false;
+}
+
+bool CheckDiag2 (char board [10][10], int i0, int j0, int i){
+
+    int c, c1;
+    for( c = i0 - 1, c1=j0 + 1; c>i; c--, c1++)
+        if (board[c][c1] != 'z')
+            return true;
+    for( c = i0 + 1, c1=j0 - 1; c<i; c++, c1--)
+        if (board[c][c1] != 'z')
+            return true;
+    return false;
+}
+
+bool CheckDiag1 (char board [10][10], int i0, int j0, int i){
+
+    int c, c1;
+    for( c = i0 + 1, c1=j0 + 1; c<i; c++, c1++)
+        if (board[c][c1] != 'z')
+            return true;
+    for( c = i0 - 1, c1=j0 - 1; c>i; c--, c1--)
+        if (board[c][c1] != 'z')
+            return true;
+    return false;
+
+}
+
+bool HasPieceBetween(char board [10][10], int i0, int j0, int i, int j){
+
+    int c, c1;
+    if (i0 == i) {                      // check on same line
+
+        if (CheckLine(board, i, j0, j))
+            return true;
+    }
+
+    else if (j0 == j) {                 // check on same column
+
+        if ( CheckColumn(board, j, i0, i) )
+            return true;
+    }
+
+    else if (i0 + j0 == i + j ){
+
+        if ( CheckDiag2(board, i0, j0, i) )
+            return true;
+    }
+    else if (i0 - j0 == i - j)
+
+        if ( CheckDiag1(board, i0, j0, i))
+            return true;
+    return false;
+}
+
+bool IsValidMove(char board[10][10], int i0, int j0, int i, int j) {
+    if (board[i0][j0] >'a' && board[i0][j0] <'z' && board[i][j] < 'z' )       //slot occupied by same player
+        return false;
+    else if (board[i0][j0] > 'A' && board[i0][j0] < 'Z' && board[i][j] > 'A' && board[i][j] < 'Z')
+        return false;
+    if (i > 8 || j > 8 || i < 1 || j < 1)
+        return false;
+    else if (board[i0][j0] == 'p' && ((i == i0 - 1) && (j == j0 || ((j==j0-1 || j==j0+1) && board[i][j] >'A' && board[i][j] < 'Z')))) // PION
+        return true;
+    else if (board[i0][j0] == 'P' && ((i == i0 + 1) && (j == j0 || ((j==j0-1 || j==j0+1) && board[i][j] >'a' && board[i][j] < 'z'))))     // pion
+        return true;
+    else if (((board[i0][j0] == 'r' || board[i0][j0] == 'R') && (i == i0 || j == j0)))           // rook
+        return true;
+    else if ((board[i0][j0] == 'h' || board[i0][j0] == 'H') && (((i == i0 + 2 || i == i0 - 2) && (j == j0 - 1 || j == j0 + 1)) ||
+                                                                ((i == i0 + 1 || i == i0 - 1) &&
+                                                                 (j == j0 - 2 || j == j0 + 2))))      //knight
+        return true;
+    else if ((board[i0][j0] == 'B' || board[i0][j0] == 'b') && ((i + j == i0 + j0) || (i - j == i0 - j0)))     //bishop
+        return true;
+    else if ((board[i0][j0] == 'Q' || board[i0][j0] == 'q') && ((i + j == i0 + j0) || (i - j == i0 - j0) || i == i0 || j == j0))      //queen
+        return true;
+    else if ((board[i0][j0] == 'K' || board[i0][j0] == 'k') && (i != i0 || j != j0) && i >= i0 - 1 && i <= i0 + 1 && j >= j0 - 1)     //king
+        return true;
+    return false;
+}
+
+bool isCheck(char board[10][10], int i, int j){
+
+
+}
 /* programul */
 
 int main ()
@@ -108,12 +255,15 @@ int main ()
     pid_t pid = 1;			   //parcurgerea listelor de descriptori
     int nfds;			/* numarul maxim de descriptori */
     int len;			/* lungimea structurii sockaddr_in */
-
+    char board[10][10];
 
     struct {
         int player1_fd, player2_fd, pipe[2], socket[2];
 
     }child_fd[20];
+
+    InitializeBoard(board);
+
 
     bzero(child_fd, sizeof(child_fd));
     if(-1 == mkfifo("my_fifo", 0600) ) {
@@ -229,15 +379,19 @@ int main ()
                 if (pid == 0) {     // [child that handles a chess match]
                     /* child only needs it's own information from the struct so I will create local variables*/
                     int p[] = {child_fd[nrOfChilds].pipe[0], child_fd[nrOfChilds].pipe[1]},
-                        s[] = {child_fd[nrOfChilds].socket[0], child_fd[nrOfChilds].socket[1]},
-                        player1_fd = child_fd[nrOfChilds].player1_fd,
-                        player2_fd = child_fd[nrOfChilds].player2_fd;
+                            s[] = {child_fd[nrOfChilds].socket[0], child_fd[nrOfChilds].socket[1]},
+                            player1_fd = child_fd[nrOfChilds].player1_fd,
+                            player2_fd = child_fd[nrOfChilds].player2_fd;
                     int infoFromPipe;
                     char msgrasp[20]=" ";
+
+
+
                     //printf("pipe: %d %d", p[0],p[1]);
                     fflush(stdout);
                     while(1)
                     {
+                        PrintBoard(board);
                         if (-1 == read(p[0], &infoFromPipe, sizeof(int)))
                         {
                             perror("Error at reading from pipe\n");
@@ -306,6 +460,10 @@ int main ()
                                     }
                                     printf("Player name sent\n");
                                     fflush(stdout);
+
+                                }
+                                else        // move
+                                {
 
                                 }
 
