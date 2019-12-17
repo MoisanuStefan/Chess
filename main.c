@@ -311,8 +311,6 @@ int main ()
     FD_ZERO (&actfds);		/* initial, multimea este vida */
     FD_SET (sd, &actfds);		/* includem in multime socketul creat */
 
-    tv.tv_sec = 1;		/* se va astepta un timp de 1 sec. */
-    tv.tv_usec = 0;
 
     /* valoarea maxima a descriptorilor folositi */
     nfds = sd;
@@ -464,6 +462,46 @@ int main ()
                                 }
                                 else        // move
                                 {
+                                    int curr_i, curr_j, dest_i, dest_j;
+                                    if( -1 == read(p[0], &curr_i, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+                                    if( -1 == read(p[0], &curr_j, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+                                    if( -1 == read(p[0], &dest_i, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }if( -1 == read(p[0], &dest_j, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+
+                                    printf("%d", curr_j);
+
+                                    int msgLen;
+                                    bzero(msgrasp, sizeof(msgrasp));
+                                    sprintf(msgrasp, "MOVE: %d %d %d %d", curr_i, curr_j, dest_i, dest_j);
+
+                                    printf("[server]Trimitem mesajul inapoi...%s\n",msgrasp);
+                                    fflush(stdout);
+                                    //printf("p2fd: %d\n", player2_fd);
+                                    //fflush(stdout);
+                                    msgLen = strlen(msgrasp);
+                                    if(-1 == write(player1_fd, msgrasp,msgLen))
+                                    {
+                                        perror("Error at writing to player1");
+                                        return errno;
+                                    }
+                                    printf("[server] Player name sent\n");
+                                    fflush(stdout);
+
 
                                 }
 
@@ -515,10 +553,54 @@ int main ()
                                     fflush(stdout);
 
                                 }
+                                else{
+                                    int curr_i, curr_j, dest_i, dest_j;
+                                    if( -1 == read(p[0], &curr_i, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+                                    if( -1 == read(p[0], &curr_j, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+                                    if( -1 == read(p[0], &dest_i, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }if( -1 == read(p[0], &dest_j, sizeof(int)))
+                                    {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+
+                                    printf("%d", curr_j);
+
+                                    int msgLen;
+                                    bzero(msgrasp, sizeof(msgrasp));
+                                    sprintf(msgrasp, "MOVE: %d %d %d %d", curr_i, curr_j, dest_i, dest_j);
+
+                                    printf("[server]Trimitem mesajul inapoi...%s\n",msgrasp);
+                                    fflush(stdout);
+                                    //printf("p2fd: %d\n", player2_fd);
+                                    //fflush(stdout);
+                                    msgLen = strlen(msgrasp);
+                                    if(-1 == write(player2_fd, msgrasp,msgLen))
+                                    {
+                                        perror("Error at writing to player1");
+                                        return errno;
+                                    }
+                                    printf("[server] Player name sent\n");
+                                    fflush(stdout);
+
+
+                                }
+                                }
                             }
 
                         }
-                    }
+
 
 
 
@@ -569,31 +651,37 @@ int main ()
                                 int bytesRead;
                                 char playerName[20];
                                 bytesRead = read (fd, playerName, sizeof (playerName));
+
                                 if (bytesRead < 0)
                                 {
                                     perror ("Eroare la read() de la client.\n");
                                     return errno;
                                 }
+
                                 int x = 0;
                                 if ( -1 == write(child_fd[i].pipe[1], &x, sizeof(int))){
                                     perror("Error at writing in pipe\n");
                                     return errno;
                                 }
+
                                 x = (fd == child_fd[i].player1_fd) ? 1 : 2;
                                 if ( -1 == write(child_fd[i].pipe[1], &x, sizeof(int))){
                                     perror("Error at writing in pipe\n");
                                     return errno;
                                 }
+
                                 x = 0;
                                 if ( -1 == write(child_fd[i].pipe[1], &x, sizeof(int))){
                                     perror("Error at writing in pipe\n");
                                     return errno;
                                 }
+
                                 int playerNameLen = strlen(playerName);
                                 if ( -1 == write(child_fd[i].pipe[1], &playerNameLen, sizeof(int))){
                                     perror("Error at writing in pipe\n");
                                     return errno;
                                 }
+
                                 if ( -1 == write(child_fd[i].pipe[1], playerName, playerNameLen)){
                                     perror("Error at writing in pipe\n");
                                     return errno;
@@ -602,11 +690,59 @@ int main ()
 
 
                             }
-                            else{
+                            else{       //move
+
+                                int coord = 1;
+
+                                if ( -1 == write(child_fd[i].pipe[1], &coord, sizeof(int))){        // let the child know coordinates are coming
+                                    perror("Error at writing in pipe\n");
+                                    return errno;
+                                }
+
+                                if( -1 == read(fd, &coord, sizeof(int)))
+                                {
+                                    perror("Error at reading from pipe.\n");
+                                    return errno;
+                                }
+                                if ( -1 == write(child_fd[i].pipe[1], &coord, sizeof(int))){
+                                    perror("Error at writing in pipe\n");
+                                    return errno;
+                                }
+
+                                if( -1 == read(fd, &coord, sizeof(int)))
+                                {
+                                    perror("Error at reading from pipe.\n");
+                                    return errno;
+                                }
+                                if ( -1 == write(child_fd[i].pipe[1], &coord, sizeof(int))){
+                                    perror("Error at writing in pipe\n");
+                                    return errno;
+                                }
+
+                                if( -1 == read(fd, &coord, sizeof(int)))
+                                {
+                                    perror("Error at reading from pipe.\n");
+                                    return errno;
+                                }
+                                if ( -1 == write(child_fd[i].pipe[1], &coord, sizeof(int))){
+                                    perror("Error at writing in pipe\n");
+                                    return errno;
+                                }
+
+                                if( -1 == read(fd, &coord, sizeof(int)))
+                                {
+                                    perror("Error at reading from pipe.\n");
+                                    return errno;
+                                }
+                                if ( -1 == write(child_fd[i].pipe[1], &coord, sizeof(int))){
+                                    perror("Error at writing in pipe\n");
+                                    return errno;
+                                }
+
 
 
                             }
-                            FD_CLR(fd, &actfds);
+
 
                         }
                     }
