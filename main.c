@@ -1,12 +1,3 @@
-/* servTCPCSel.c - Exemplu de server TCP concurent
-
-   Asteapta un "nume" de la clienti multipli si intoarce clientilor sirul
-   "Hello nume" corespunzator; multiplexarea intrarilor se realizeaza cu select().
-
-   Cod sursa preluat din [Retele de Calculatoare,S.Buraga & G.Ciobanu, 2003] si modificat de
-   Lenuta Alboaie  <adria@infoiasi.ro> (c)2009
-
-*/
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -21,13 +12,10 @@
 #include <fcntl.h>
 #include <stdbool.h>
 
-/* portul folosit */
-
 #define PORT 2726
 
-extern int errno;		/* eroarea returnata de unele apeluri */
+extern int errno;
 
-/* functie de convertire a adresei IP a clientului in sir de caractere */
 char * conv_addr (struct sockaddr_in address)
 {
     static char str[25];
@@ -127,6 +115,11 @@ void InitializeBoard(char b[10][10]){
 
 }
 
+void UpdateBoard(char b[10][10], int i0, int j0, int i, int j){
+
+    b[i][j] = b[i0][j0];
+    b[i0][j0] = 'z';
+}
 void PrintBoard(char b[10][10]){
     int i,j;
     for (i=0; i<10; ++i) {
@@ -198,12 +191,12 @@ bool HasPieceBetween(char board [10][10], int i0, int j0, int i, int j){
             return true;
     }
 
-    else if (i0 + j0 == i + j ){
+    else if (i0 + j0 == i + j ){        // check on diag2
 
         if ( CheckDiag2(board, i0, j0, i) )
             return true;
     }
-    else if (i0 - j0 == i - j)
+    else if (i0 - j0 == i - j)          //check on diag1
 
         if ( CheckDiag1(board, i0, j0, i))
             return true;
@@ -213,33 +206,46 @@ bool HasPieceBetween(char board [10][10], int i0, int j0, int i, int j){
 bool IsValidMove(char board[10][10], int i0, int j0, int i, int j) {
     if (board[i0][j0] >'a' && board[i0][j0] <'z' && board[i][j] < 'z' )       //slot occupied by same player
         return false;
-    else if (board[i0][j0] > 'A' && board[i0][j0] < 'Z' && board[i][j] > 'A' && board[i][j] < 'Z')
+    else if (board[i0][j0] > 'A' && board[i0][j0] < 'Z' && board[i][j] > 'A' && board[i][j] < 'Z')      // slot occupied by same player
         return false;
-    if (i > 8 || j > 8 || i < 1 || j < 1)
+    if (i > 8 || j > 8 || i < 1 || j < 1)       // out of board
         return false;
-    else if (board[i0][j0] == 'p' && ((i == i0 - 1) && (j == j0 || ((j==j0-1 || j==j0+1) && board[i][j] >'A' && board[i][j] < 'Z')))) // PION
+    else if (board[i0][j0] == 'p' && ((i == i0 - 1) && ((j==j0 && board[i][j] == 'z') || ((j==j0-1 || j==j0+1) && board[i][j] >'A' && board[i][j] < 'Z')))) // PION
         return true;
-    else if (board[i0][j0] == 'P' && ((i == i0 + 1) && (j == j0 || ((j==j0-1 || j==j0+1) && board[i][j] >'a' && board[i][j] < 'z'))))     // pion
+    else if (board[i0][j0] == 'P' && ((i == i0 + 1) && ((j==j0 && board[i][j] == 'z') || ((j==j0-1 || j==j0+1) && board[i][j] >'a' && board[i][j] < 'z'))))     // pion
         return true;
-    else if (((board[i0][j0] == 'r' || board[i0][j0] == 'R') && (i == i0 || j == j0)))           // rook
+    else if (((board[i0][j0] == 'r' || board[i0][j0] == 'R') && (i == i0 || j == j0)) && !HasPieceBetween(board, i0, j0, i, j))        // rook
         return true;
     else if ((board[i0][j0] == 'h' || board[i0][j0] == 'H') && (((i == i0 + 2 || i == i0 - 2) && (j == j0 - 1 || j == j0 + 1)) ||
                                                                 ((i == i0 + 1 || i == i0 - 1) &&
                                                                  (j == j0 - 2 || j == j0 + 2))))      //knight
         return true;
-    else if ((board[i0][j0] == 'B' || board[i0][j0] == 'b') && ((i + j == i0 + j0) || (i - j == i0 - j0)))     //bishop
+    else if ((board[i0][j0] == 'B' || board[i0][j0] == 'b') && ((i + j == i0 + j0) || (i - j == i0 - j0)) && !HasPieceBetween(board, i0,j0,i,j))     //bishop
         return true;
-    else if ((board[i0][j0] == 'Q' || board[i0][j0] == 'q') && ((i + j == i0 + j0) || (i - j == i0 - j0) || i == i0 || j == j0))      //queen
+    else if ((board[i0][j0] == 'Q' || board[i0][j0] == 'q') && ((i + j == i0 + j0) || (i - j == i0 - j0) || i == i0 || j == j0) && !HasPieceBetween(board, i0,j0,i,j))      //queen
         return true;
     else if ((board[i0][j0] == 'K' || board[i0][j0] == 'k') && (i != i0 || j != j0) && i >= i0 - 1 && i <= i0 + 1 && j >= j0 - 1)     //king
         return true;
     return false;
 }
 
-bool isCheck(char board[10][10], int i, int j){
+int CodeMove ( int a, int b, int c, int d)
+{
+    return a*1000 + b*100 + c*10 + d;
+}
 
+void DecodeMove (int move, int *i0, int *j0, int *i, int *j)
+{
+    *j = move % 10;
+    move /= 10;
+    *i = move % 10;
+    move /= 10;
+    *j0 = move % 10;
+    move /= 10;
+    *i0 = move;
 
 }
+
 /* programul */
 
 int main ()
@@ -344,9 +350,9 @@ int main ()
                 return errno;
             }
             if (pid == 0) {     // [child that handles a chess match]
-                int player1_fd = client, player2_fd, nameLen;
+                int player1_fd = client, player2_fd, nameLen, move;
                 bool bothConnected = false;
-                int infoFromPipe;
+                int infoFromPipe, bytesRead;
                 char msgrasp[20]=" ";
 
                 bzero(player_name, sizeof(player_name));
@@ -387,14 +393,26 @@ int main ()
                         if (FD_ISSET (fds[fd], &readfds)) {
                             printf("in isset if with fd = %d\n", fd);
                             char nameOrMove;
-                            if (-1 == read(fds[fd], &nameOrMove, sizeof(char)))     // reading the name or move char
+
+                            bytesRead = read(fds[fd], &nameOrMove, sizeof(char));
+                            if ( bytesRead == -1 )     // reading the name or move char
                             {
                                 perror("Error at reading from pipe\n");
                                 return errno;
                             }
+
+                            else if (bytesRead == 0){       // player disconnected => I disconnect opponent as well
+                                int x = 0;
+                                close(fds[fd]);
+                                if (-1 == write(fds[1 - fd], &x, sizeof(int))) {         // let opponent know about disconnection
+                                    perror("Error at writing to player1");
+                                    return errno;
+                                }
+                                close(fds[1 - fd]);
+                            }
                             printf("nameormove: %c\n", nameOrMove);
                             if (nameOrMove == '0') {       // name
-                                int bytesRead;
+
 
                                 if (read (fds[fd], &nameLen, sizeof(int)) <= 0) {
                                     perror("[client]Eroare la write() spre server.\n");
@@ -426,34 +444,40 @@ int main ()
                             } else {       //move
 
                                 int curr_i, curr_j, dest_i, dest_j;
-                                if (-1 == read(fds[fd], &curr_i, sizeof(int))) {
-                                    perror("Error at reading from pipe.\n");
-                                    return errno;
-                                }
-                                if (-1 == read(fds[fd], &curr_j, sizeof(int))) {
-                                    perror("Error at reading from pipe.\n");
-                                    return errno;
-                                }
-                                if (-1 == read(fds[fd], &dest_i, sizeof(int))) {
-                                    perror("Error at reading from pipe.\n");
-                                    return errno;
-                                }
-                                if (-1 == read(fds[fd], &dest_j, sizeof(int))) {
+                                if (-1 == read(fds[fd], &move, sizeof(int))) {
                                     perror("Error at reading from pipe.\n");
                                     return errno;
                                 }
 
-
+                                DecodeMove(move, &curr_i, &curr_j, &dest_i, &dest_j);
                                 bzero(msgrasp, sizeof(msgrasp));
                                 sprintf(msgrasp, "%d %d %d %d", curr_i, curr_j, dest_i, dest_j);
 
                                 printf("[server]Trimitem mesajul inapoi...%s\n", msgrasp);
                                 fflush(stdout);
 
-                                if (-1 == write(fds[1 - fd], msgrasp, 7)) {
-                                    perror("Error at writing to player1");
-                                    return errno;
+                                if ( IsValidMove(board, curr_i, curr_j, dest_i, dest_j) && ((board[curr_i][curr_j] > 'a' && fd == 0) || ((board[curr_i][curr_j] < 'Z' && fd == 1))))
+                                {
+
+                                    UpdateBoard(board, curr_i, curr_j, dest_i, dest_j);
+                                    PrintBoard(board);
+                                    move = CodeMove(curr_i, curr_j, dest_i, dest_j);
+                                    if (-1 == write (fds[1 - fd], &move, sizeof(int))) {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+
+
                                 }
+
+                                else {
+                                    move = 1;
+                                    if (-1 == write (fds[fd], &move, sizeof(int))) {
+                                        perror("Error at reading from pipe.\n");
+                                        return errno;
+                                    }
+                                }
+
                                 printf("[server] Move sent to player %d\n", fd + 1);
                                 fflush(stdout);
 
