@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <wait.h>
 
 #define PORT 2726
 
@@ -246,99 +247,105 @@ void DecodeMove (int move, int *i0, int *j0, int *i, int *j)
 
 }
 
-/* programul */
+int Intread(int fd, int *readDest)
+{
+    int bytesRead;
+    bytesRead = read (fd, readDest, sizeof(int));
+    if (bytesRead < 0){
+        perror("Error at reading.\n");
+        exit(2);
+    }
+    return bytesRead;
+}
+
+int Charread(int fd, char *readDest, int len)
+{
+    int bytesRead;
+    bytesRead = read (fd, readDest, len);
+    if (bytesRead < 0){
+        perror("Error at reading.\n");
+        exit(2);
+    }
+    return bytesRead;
+}
+
+void Intwrite (int fd, int *writeDest){
+    if (-1 == write(fd, writeDest, sizeof(int))) {
+        perror("Error at writing\n");
+        exit(2);
+    }
+}
+
+void Charwrite (int fd, char *writeDest, int len){
+    if (-1 == write(fd, writeDest, len)) {
+        perror("Error at writing\n");
+        exit(2);
+    }
+}
 
 int main ()
 {
-    struct sockaddr_in server;	/* structurile pentru server si clienti */
+    struct sockaddr_in server;
     struct sockaddr_in from;
-    fd_set readfds;		/* multimea descriptorilor de citire */
-    fd_set actfds;		/* multimea descriptorilor activi */
-    struct timeval tv;		/* structura de timp pentru select() */
-    int sd, client, max_fd, fds[2], UNIXsocket[2];		/* descriptori de socket */
-    int optval=1; 			/* optiune folosita pentru setsockopt()*/
-    int fd, clientCounter = 0, nrOfChilds = 0, txt_fd;			// descriptor folosit pentru
-    pid_t pid = 1;			   //parcurgerea listelor de descriptori
-    int nfds;			/* numarul maxim de descriptori */
-    int len, msglen;			/* lungimea structurii sockaddr_in */
+    fd_set readfds;
+    fd_set actfds;
+    int sd, client, max_fd, fds[2], UNIXsocket[2], optval=1, fd, clientCounter = 0, len;
+    pid_t pid = 1;
     char board[10][10], player_name[2][20];
-
 
     InitializeBoard(board);
 
-    if(-1 == mkfifo("my_fifo", 0600) ) {
-        if (errno == EEXIST) {
-            printf("Using already existent fifo: \"my_fifo\" ...\n");
-        } else {
-            perror("Error at creating \"my_fifo\" file.\n");
-            exit(1);
-        }
-
-    }
-    /* creare socket */
     if ((sd = socket (AF_INET, SOCK_STREAM, 0)) == -1)
     {
-        perror ("[server] Eroare la socket().\n");
+        perror ("Error at socket().\n");
         return errno;
     }
 
-    /*setam pentru socket optiunea SO_REUSEADDR */
     setsockopt(sd, SOL_SOCKET, SO_REUSEADDR,&optval,sizeof(optval));
 
-    /* pregatim structurile de date */
     bzero (&server, sizeof (server));
 
-    /* umplem structura folosita de server */
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = htonl (INADDR_ANY);
     server.sin_port = htons (PORT);
 
-    /* atasam socketul */
     if (bind (sd, (struct sockaddr *) &server, sizeof (struct sockaddr)) == -1)
     {
-        perror ("[server] Eroare la bind().\n");
+        perror ("Error at bind().\n");
         return errno;
     }
 
-    /* punem serverul sa asculte daca vin clienti sa se conecteze */
     if (listen (sd, 5) == -1)
     {
-        perror ("[server] Eroare la listen().\n");
+        perror ("Error at listen().\n");
         return errno;
     }
 
 
-
-    /* servim in mod concurent clientii... */
     while (1)
     {
-        printf ("[server] Asteptam la portul %d...\n", PORT);
+        printf ("Waiting at port nr: %d...\n", PORT);
         fflush (stdout);
 
-        /* pregatirea structurii client */
         len = sizeof(from);
         bzero(&from, sizeof(from));
 
-        /* a venit un client, acceptam conexiunea */
         client = accept(sd, (struct sockaddr *) &from, &len);
-        /* eroare la acceptarea conexiunii de la un client */
         if (client < 0) {
-            perror("[server] Eroare la accept().\n");
+            perror("Error at accept().\n");
             continue;
         }
 
-        printf("[server] S-a conectat clientul cu descriptorul %d, de la adresa %s.\n", client, conv_addr(from));
+        printf("Client with fd %d, connected at address %s.\n", client, conv_addr(from));
         fflush(stdout);
         clientCounter++;
 
         if (clientCounter % 2 == 1)       // if it's a player waiting for opponent
         {
 
-            int player = 1;
-            if (-1 == write(client, &player, sizeof(int))) {        // letting the client know he's player 1, making first move
-                perror("Error at writing to player1");
-                return errno;
-            }
+            int player = 0;
+
+            Intwrite(client, &player);                  // letting the client know he's player 1, making first move
 
             if (socketpair(AF_UNIX, SOCK_DGRAM, 0, UNIXsocket )!= 0) {
                 perror("Failed to create Unix-domain socket pair\n");
@@ -350,178 +357,117 @@ int main ()
                 return errno;
             }
             if (pid == 0) {     // [child that handles a chess match]
-                int player1_fd = client, player2_fd, nameLen, move;
-                bool bothConnected = false;
-                int infoFromPipe, bytesRead;
-                char msgrasp[20]=" ";
+                int player1_fd = client, player2_fd, nameLen, move, bytesRead;
+                char msgrasp[20]=" ", nameOrMove;
 
                 bzero(player_name, sizeof(player_name));
                 player2_fd = ReceiveFd(UNIXsocket[0]);       // waiting for second player connection
 
                 max_fd = (player1_fd > player2_fd) ? player1_fd : player2_fd;
 
-                /* completam multimea de descriptori de citire */
-                FD_ZERO (&actfds);		/* initial, multimea este vida */
-                FD_SET (player1_fd, &actfds);		/* includem in multime socketul creat */
-                FD_SET (player2_fd, &actfds);
 
-                /* valoarea maxima a descriptorilor folositi */
+                FD_ZERO (&actfds);
+                FD_SET (player1_fd, &actfds);
+                FD_SET (player2_fd, &actfds);
 
                 fds[0] = player1_fd;
                 fds[1] = player2_fd;
-                printf("%d %d",fds[0], fds[1] );
 
-                //printf("pipe: %d %d", p[0],p[1]);
-                fflush(stdout);
                 while(1) {
-                    //PrintBoard(board);
-                    /* ajustam multimea descriptorilor activi (efectiv utilizati) */
+
                     bcopy((char *) &actfds, (char *) &readfds, sizeof(readfds));
 
-
-                    /* apelul select() */
                     if (select(max_fd + 1, &readfds, NULL, NULL, NULL) < 0) {
                         perror("[server] Eroare la select().\n");
                         return errno;
                     }
 
-
-
-                    for (fd = 0; fd <= 1; ++fd)    /* parcurgem multimea de descriptori */
-                    {
-                        /* este un socket de citire pregatit? */
+                    for (fd = 0; fd <= 1; ++fd) {
                         if (FD_ISSET (fds[fd], &readfds)) {
-                            printf("in isset if with fd = %d\n", fd);
-                            char nameOrMove;
 
-                            bytesRead = read(fds[fd], &nameOrMove, sizeof(char));
-                            if ( bytesRead == -1 )     // reading the name or move char
-                            {
-                                perror("Error at reading from pipe\n");
-                                return errno;
-                            }
+                            bytesRead = Charread(fds[fd], &nameOrMove, sizeof(char));      // reading the name or move char
 
-                            else if (bytesRead == 0){       // player disconnected => I disconnect opponent as well
+                            if (bytesRead == 0) {                    // player disconnected => I disconnect opponent as well
                                 int x = 0;
                                 close(fds[fd]);
-                                if (-1 == write(fds[1 - fd], &x, sizeof(int))) {         // let opponent know about disconnection
-                                    perror("Error at writing to player1");
-                                    return errno;
-                                }
+                                Intwrite(fds[1 - fd], &x);            // let opponent know about disconnection by sending special code to identify disconnections
                                 close(fds[1 - fd]);
+                                clientCounter -= 2;
                             }
-                            printf("nameormove: %c\n", nameOrMove);
-                            if (nameOrMove == '0') {       // name
+
+                            if (nameOrMove == '0') {                                             // name
+
+                                Intread(fds[fd], &nameLen);                                    // getting name length
+                                Charread(fds[fd], player_name[fd], nameLen);                   // getting name
+
+                                Intwrite(fds[1 - fd], &nameLen);                              // sending name length
+                                Charwrite(fds[1 - fd], player_name[fd], nameLen);             // sending name
 
 
-                                if (read (fds[fd], &nameLen, sizeof(int)) <= 0) {
-                                    perror("[client]Eroare la write() spre server.\n");
-                                    return errno;
-                                }
+                            } else {                                                            //move
 
-                                bytesRead = read(fds[fd], player_name[fd], nameLen);
-                                if (bytesRead < 0) {
-                                    perror("Eroare la read() de la client.\n");
-                                    return errno;
-                                }
+                                int curr_i, curr_j, dest_i, dest_j;                             // coordinates for piece to be moved and its destination
 
-                                printf("got name: %s", player_name[fd]);
-                                fflush(stdout);
+                                Intread(fds[fd], &move);                                         // getting coordinates as a 4 digit int
 
-                                if (-1 == write(fds[1 - fd], &nameLen, sizeof(int))) {
-                                    perror("Error at writing to player");
-                                    return errno;
-                                }
-                                if (-1 == write(fds[1 - fd], player_name[fd], nameLen)) {
-                                    perror("Error at writing to player");
-                                    return errno;
-                                }
-                                printf("[server] Name sent to player %d\n", 1 - fd + 1);
-                                fflush(stdout);
+                                DecodeMove(move, &curr_i, &curr_j, &dest_i, &dest_j);           // getting each individual coord from 4 digit int
 
+                                if ( IsValidMove(board, curr_i, curr_j, dest_i, dest_j) && ((board[curr_i][curr_j] > 'a' && fd == 0) || ((board[curr_i][curr_j] < 'Z' && fd == 1)))) {               // checking if the move is valid and each player moves its own pieces
 
-
-                            } else {       //move
-
-                                int curr_i, curr_j, dest_i, dest_j;
-                                if (-1 == read(fds[fd], &move, sizeof(int))) {
-                                    perror("Error at reading from pipe.\n");
-                                    return errno;
-                                }
-
-                                DecodeMove(move, &curr_i, &curr_j, &dest_i, &dest_j);
-                                bzero(msgrasp, sizeof(msgrasp));
-                                sprintf(msgrasp, "%d %d %d %d", curr_i, curr_j, dest_i, dest_j);
-
-                                printf("[server]Trimitem mesajul inapoi...%s\n", msgrasp);
-                                fflush(stdout);
-
-                                if ( IsValidMove(board, curr_i, curr_j, dest_i, dest_j) && ((board[curr_i][curr_j] > 'a' && fd == 0) || ((board[curr_i][curr_j] < 'Z' && fd == 1))))
-                                {
-
-                                    UpdateBoard(board, curr_i, curr_j, dest_i, dest_j);
-                                    PrintBoard(board);
-                                    move = CodeMove(curr_i, curr_j, dest_i, dest_j);
-                                    if (-1 == write (fds[1 - fd], &move, sizeof(int))) {
-                                        perror("Error at reading from pipe.\n");
-                                        return errno;
+                                    if (board[dest_i][dest_j] == 'K' && fd == 0)                // Player 2 king removed from game
+                                    {
+                                        move = 2;
+                                        Intwrite(fds[1 - fd], &move);                           // sending special code to identify player 1 win
+                                        Intwrite(fds[fd], &move);
+                                        close(fds[0]);
+                                        close(fds[1]);
                                     }
 
+                                    else if (board[dest_i][dest_j] == 'k' && fd == 1)                // Player 1 king removed from game
+                                    {
+                                        move = 3;
+                                        Intwrite(fds[1 - fd], &move);                           // sending special code to identify player 2 win
+                                        Intwrite(fds[fd], &move);
+                                        close(fds[0]);
+                                        close(fds[1]);
+                                    }
+                                    else {
 
-                                }
+                                        UpdateBoard(board, curr_i, curr_j, dest_i, dest_j);                      // update the game state matrix
+                                        PrintBoard(board);
 
-                                else {
+                                        move = CodeMove(curr_i, curr_j, dest_i, dest_j);                        // creating 4 digit int from coordinates
+                                        Intwrite(fds[1 - fd], &move);                                          // sending move to opponent
+                                    }
+
+                                } else {              // not a valid move
+
                                     move = 1;
-                                    if (-1 == write (fds[fd], &move, sizeof(int))) {
-                                        perror("Error at reading from pipe.\n");
-                                        return errno;
-                                    }
+                                    Intwrite(fds[fd], &move);           // sending special code to client for identifying invalid moves
+
                                 }
-
-                                printf("[server] Move sent to player %d\n", fd + 1);
-                                fflush(stdout);
-
-
-                            }
-
-
-                        }
-
-                    }
-
-
-                }
-            }
-            nrOfChilds++;
-        } else {     // if it's the second player to be assigned to a waiting player 1
-            if (pid > 0) {
-                /* All messages from parent to it's children processes will start with a char
-                 * that shows if it's information coming from an already connected player or the fd of a new connection:
-                 * '0' - old client
-                 * '1' - new client
-                 *      If the first char = '0', it will be followed by a char specifying from which player is the info coming from:
-                 *      '1' - player1
-                 *      '2' - player2
-                 *             The third char tells me if I'm getting the name of the player or a move:
-                 *             '0' - name
-                 *             '1' - move
-                 */
-                int player = 2;
-                if (-1 == write(client, &player, sizeof(int))) {        // letting the client know he's player 2, waiting for player 1 move
-                    perror("Error at writing to player1");
-                    return errno;
-                }
-
-                SendFd(UNIXsocket[1] , client);
-
-
-
-
-
-            }
+                            }  // move else
+                        }  // FD_ISSET if
+                    }   // for
+                }   //while
+            }   // child if
         }
 
-    }/* while */
+        else {                                                    // if it's the second player to be assigned to a waiting player 1
+            if (pid > 0) {
+
+                int player = 1;
+
+                Intwrite(client, &player);                      // letting the client know he's player 2
+                SendFd(UNIXsocket[1] , client);                 // send its fd to child
+            }
+
+            while(waitpid(-1, NULL, WNOHANG) > 0 ){}
+        }
+
+
+
+    }   // while
 }
-/* main */
+
 
