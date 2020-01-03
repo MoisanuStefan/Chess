@@ -13,7 +13,7 @@
 #include <stdbool.h>
 #include <wait.h>
 
-#define PORT 2726
+#define PORT 3490
 
 extern int errno;
 
@@ -402,13 +402,26 @@ int main ()
 
                                 Intwrite(fds[1 - fd], &nameLen);                              // sending name length
                                 Charwrite(fds[1 - fd], player_name[fd], nameLen);             // sending name
-
+                                int counter=0;
 
                             } else {                                                            //move
 
                                 int curr_i, curr_j, dest_i, dest_j;                             // coordinates for piece to be moved and its destination
 
                                 Intread(fds[fd], &move);                                         // getting coordinates as a 4 digit int
+
+                                int useless = 5;
+
+                                if (counter == 0)
+                                {
+                                    write(fds[0], &useless, sizeof(int));
+                                    write(fds[1], &useless, sizeof(int)); 
+                                }
+
+                                counter++;
+
+                                if(counter>1 && counter%2==0)
+                                    write(fds[1], &useless, sizeof(int));
 
                                 DecodeMove(move, &curr_i, &curr_j, &dest_i, &dest_j);           // getting each individual coord from 4 digit int
 
