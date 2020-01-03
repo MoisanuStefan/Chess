@@ -16,6 +16,7 @@
 #define PORT 3490
 
 extern int errno;
+int counter=0;
 
 char * conv_addr (struct sockaddr_in address)
 {
@@ -402,7 +403,6 @@ int main ()
 
                                 Intwrite(fds[1 - fd], &nameLen);                              // sending name length
                                 Charwrite(fds[1 - fd], player_name[fd], nameLen);             // sending name
-                                int counter=0;
 
                             } else {                                                            //move
 
