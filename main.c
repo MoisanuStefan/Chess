@@ -1,3 +1,4 @@
+
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -12,25 +13,26 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <wait.h>
+#include <sqlite3.h>
 
 #define PORT 2726
 
-extern int errno;
+struct leaderboard{
+    char username[100];
+    int score;
+}myLB[100];
 
 char * conv_addr (struct sockaddr_in address)
 {
     static char str[25];
     char port[7];
 
-    /* adresa IP a clientului */
     strcpy (str, inet_ntoa (address.sin_addr));
-    /* portul utilizat de client */
     bzero (port, sizeof(port));
     sprintf (port, ":%d", ntohs (address.sin_port));
     strcat (str, port);
     return (str);
 }
-
 
 void SendFd(int socket, int fd)  // send fd by socket
 {
@@ -140,7 +142,7 @@ bool CheckLine (char board [10][10], int i, int j0, int j){
             return true;
     return false;
 
-}
+}                                                         // following functions check if a piece exists on the path from initial pos to destination
 bool CheckColumn (char board [10][10], int j, int i0, int i) {
     int c;
     for (c = i0 + 1; c < i; ++c)
@@ -179,7 +181,7 @@ bool CheckDiag1 (char board [10][10], int i0, int j0, int i){
 
 bool HasPieceBetween(char board [10][10], int i0, int j0, int i, int j){
 
-    int c, c1;
+
     if (i0 == i) {                      // check on same line
 
         if (CheckLine(board, i, j0, j))
@@ -233,7 +235,8 @@ bool IsValidMove(char board[10][10], int i0, int j0, int i, int j) {
 int CodeMove ( int a, int b, int c, int d)
 {
     return a*1000 + b*100 + c*10 + d;
-}
+}                                                                        // creates 4-digit int
+
 
 void DecodeMove (int move, int *i0, int *j0, int *i, int *j)
 {
@@ -245,7 +248,7 @@ void DecodeMove (int move, int *i0, int *j0, int *i, int *j)
     move /= 10;
     *i0 = move;
 
-}
+}                                                      // gets 4 ints from 4-digit int
 
 int Intread(int fd, int *readDest)
 {
@@ -256,7 +259,7 @@ int Intread(int fd, int *readDest)
         exit(2);
     }
     return bytesRead;
-}
+}                                                                                // read wrapper
 
 int Charread(int fd, char *readDest, int len)
 {
@@ -274,7 +277,7 @@ void Intwrite (int fd, int *writeDest){
         perror("Error at writing\n");
         exit(2);
     }
-}
+}                                                                             // write wrapper
 
 void Charwrite (int fd, char *writeDest, int len){
     if (-1 == write(fd, writeDest, len)) {
@@ -289,16 +292,22 @@ int main ()
     struct sockaddr_in from;
     fd_set readfds;
     fd_set actfds;
-    int sd, client, max_fd, fds[2], UNIXsocket[2], optval=1, fd, clientCounter = 0, len;
+    int sd, client, max_fd, fds[2], UNIXsocket[2], optval=1, fd, clientCounter = 0, len, errCode = 0;
     pid_t pid = 1;
-    char board[10][10], player_name[2][20];
+    char board[10][10], player_name[2][20], sql[200], *error;
 
-    InitializeBoard(board);
+    sqlite3_stmt *res;
+    sqlite3* db;
+
+    InitializeBoard(board);                                                                                             // set pions on matrix for new game
+
+    if (sqlite3_open("/home/stef/Leaderboard.db", &db))
+        perror("Error at opening database.\n");
 
     if ((sd = socket (AF_INET, SOCK_STREAM, 0)) == -1)
     {
         perror ("Error at socket().\n");
-        return errno;
+        exit(3);
     }
 
     setsockopt(sd, SOL_SOCKET, SO_REUSEADDR,&optval,sizeof(optval));
@@ -312,20 +321,20 @@ int main ()
     if (bind (sd, (struct sockaddr *) &server, sizeof (struct sockaddr)) == -1)
     {
         perror ("Error at bind().\n");
-        return errno;
+        exit(3);
     }
 
     if (listen (sd, 5) == -1)
     {
         perror ("Error at listen().\n");
-        return errno;
+        exit(3);
     }
 
-
+    printf ("Waiting at port nr: %d...\n", PORT);
+    fflush (stdout);
     while (1)
     {
-        printf ("Waiting at port nr: %d...\n", PORT);
-        fflush (stdout);
+
 
         len = sizeof(from);
         bzero(&from, sizeof(from));
@@ -340,31 +349,29 @@ int main ()
         fflush(stdout);
         clientCounter++;
 
-        if (clientCounter % 2 == 1)       // if it's a player waiting for opponent
+        if (clientCounter % 2 == 1)                                                                                     // if it's a player waiting for opponent
         {
 
             int player = 0;
-
-            Intwrite(client, &player);                  // letting the client know he's player 1, making first move
+            Intwrite(client, &player);                                                                                  // letting the client know he's player 1, making first move
 
             if (socketpair(AF_UNIX, SOCK_DGRAM, 0, UNIXsocket )!= 0) {
                 perror("Failed to create Unix-domain socket pair\n");
-                return errno;
+                exit(3);
             }
 
             if (-1 == (pid = fork())) {
                 perror("Error at fork.\n");
-                return errno;
+                exit(3);
             }
-            if (pid == 0) {     // [child that handles a chess match]
+            if (pid == 0) {                                                                                             // [child that handles a chess match]
                 int player1_fd = client, player2_fd, nameLen, move, bytesRead;
-                char msgrasp[20]=" ", nameOrMove;
+                char specialCode;
 
                 bzero(player_name, sizeof(player_name));
-                player2_fd = ReceiveFd(UNIXsocket[0]);       // waiting for second player connection
+                player2_fd = ReceiveFd(UNIXsocket[0]);                                                                  // waiting for second player connection
 
                 max_fd = (player1_fd > player2_fd) ? player1_fd : player2_fd;
-
 
                 FD_ZERO (&actfds);
                 FD_SET (player1_fd, &actfds);
@@ -378,72 +385,129 @@ int main ()
                     bcopy((char *) &actfds, (char *) &readfds, sizeof(readfds));
 
                     if (select(max_fd + 1, &readfds, NULL, NULL, NULL) < 0) {
-                        perror("[server] Eroare la select().\n");
-                        return errno;
+                        perror("Error at select().\n");
+                        exit(3);
                     }
 
                     for (fd = 0; fd <= 1; ++fd) {
                         if (FD_ISSET (fds[fd], &readfds)) {
 
-                            bytesRead = Charread(fds[fd], &nameOrMove, sizeof(char));      // reading the name or move char
+                            bytesRead = Charread(fds[fd], &specialCode, sizeof(char));                                  // reading the specialCode char
 
-                            if (bytesRead == 0) {                    // player disconnected => I disconnect opponent as well
+                            if (bytesRead == 0) {                                                                       // player disconnected => I disconnect opponent as well
                                 int x = 0;
                                 close(fds[fd]);
-                                Intwrite(fds[1 - fd], &x);            // let opponent know about disconnection by sending special code to identify disconnections
+                                Intwrite(fds[1 - fd], &x);                                                              // let opponent know about disconnection by sending special code to identify disconnections
                                 close(fds[1 - fd]);
                                 clientCounter -= 2;
                             }
 
-                            if (nameOrMove == '0') {                                             // name
+                            if (specialCode == '0') {                                                                   // specialCode -> name
 
-                                Intread(fds[fd], &nameLen);                                    // getting name length
-                                Charread(fds[fd], player_name[fd], nameLen);                   // getting name
+                                Intread(fds[fd], &nameLen);                                                             // getting name length
+                                Charread(fds[fd], player_name[fd], nameLen);                                            // getting name
 
-                                Intwrite(fds[1 - fd], &nameLen);                              // sending name length
-                                Charwrite(fds[1 - fd], player_name[fd], nameLen);             // sending name
+                                sprintf(sql, "SELECT * FROM leaderboard WHERE username = '%s'", player_name[fd]);       // query to identify if player_name[fd] exists in username column
+                                errCode = sqlite3_prepare_v2(db, sql, -1, &res, 0);
+                                if (errCode != SQLITE_OK) {
+                                    fprintf(stderr, "Failed to execute statement: %s\n", sqlite3_errmsg(db));
+                                    exit(2);
+                                }
+
+                                int step = sqlite3_step(res);
+                                if (step != SQLITE_ROW) {                                                               // if username is not in table already, I add it with score 0
+                                    sprintf(sql, "INSERT INTO leaderboard VALUES('%s',%d)", player_name[fd], 0);
+                                    errCode = sqlite3_exec(db, sql, NULL, 0,&error);
+                                    if (errCode != SQLITE_OK) {
+                                        fprintf(stderr, "Failed to execute statement: %s\n", sqlite3_errmsg(db));
+                                        exit(2);
+                                    }
+                                }
+
+                                Intwrite(fds[1 - fd], &nameLen);                                                        // sending name length
+                                Charwrite(fds[1 - fd], player_name[fd], nameLen);                                       // sending name
 
 
-                            } else {                                                            //move
+                            }
 
-                                int curr_i, curr_j, dest_i, dest_j;                             // coordinates for piece to be moved and its destination
+                            else if(specialCode == '2'){                                                                // specialCode -> leaderboard request
 
-                                Intread(fds[fd], &move);                                         // getting coordinates as a 4 digit int
+                                if(sqlite3_prepare_v2(db, "SELECT * FROM leaderboard ORDER BY score DESC", -1, &res, 0) != SQLITE_OK)   // get leaderboard from database ordered by score
+                                {
+                                    sqlite3_close(db);
+                                    printf("Can't retrieve data: %s\n", sqlite3_errmsg(db));
+                                    exit(2);
+                                }
+                                int LBSize = 0;
 
-                                DecodeMove(move, &curr_i, &curr_j, &dest_i, &dest_j);           // getting each individual coord from 4 digit int
+                                while(sqlite3_step(res) == SQLITE_ROW)                                                  // as long as there are lines in database, I populate myLB
+                                {
 
-                                if ( IsValidMove(board, curr_i, curr_j, dest_i, dest_j) && ((board[curr_i][curr_j] > 'a' && fd == 0) || ((board[curr_i][curr_j] < 'Z' && fd == 1)))) {               // checking if the move is valid and each player moves its own pieces
+                                    strcpy(myLB[LBSize].username, sqlite3_column_text(res, 0));
+                                    myLB[LBSize++].score = sqlite3_column_int(res,1);
 
-                                    if (board[dest_i][dest_j] == 'K' && fd == 0)                // Player 2 king removed from game
+                                }
+                                write(fds[fd], &LBSize, sizeof(int));
+                                write(fds[fd], &myLB, sizeof(myLB));
+                            }
+
+
+                            else {                                                                                      // specialCode -> move
+
+                                int curr_i, curr_j, dest_i, dest_j;                                                     // coordinates for piece to be moved and its destination
+
+                                Intread(fds[fd], &move);                                                                // getting coordinates as a 4-digit int
+
+                                DecodeMove(move, &curr_i, &curr_j, &dest_i, &dest_j);                                   // getting each individual coord from 4-digit int
+
+                                if ( IsValidMove(board, curr_i, curr_j, dest_i, dest_j) && ((board[curr_i][curr_j] > 'a' && fd == 0) || ((board[curr_i][curr_j] < 'Z' && fd == 1)))) {        // checking if the move is valid and each player moves its own pieces
+
+                                    if (board[dest_i][dest_j] == 'K' && fd == 0)                                        // Player 2 king removed from game
                                     {
                                         move = 2;
-                                        Intwrite(fds[1 - fd], &move);                           // sending special code to identify player 1 win
+                                        Intwrite(fds[1 - fd], &move);                                                   // sending special code to identify player 1 win
                                         Intwrite(fds[fd], &move);
                                         close(fds[0]);
                                         close(fds[1]);
+
+                                        // updating score for player 1 in database
+                                        sprintf(sql, "UPDATE leaderboard SET score = (SELECT score FROM leaderboard WHERE username ='%s') + 1 WHERE username = '%s'", player_name[0], player_name[0]);
+                                        errCode = sqlite3_exec(db, sql, NULL, 0,&error);
+                                        if (errCode != SQLITE_OK) {
+                                            fprintf(stderr, "Failed to execute statement: %s\n", sqlite3_errmsg(db));
+                                            exit(2);
+                                        }
                                     }
 
-                                    else if (board[dest_i][dest_j] == 'k' && fd == 1)                // Player 1 king removed from game
+                                    else if (board[dest_i][dest_j] == 'k' && fd == 1)                                   // Player 1 king removed from game
                                     {
                                         move = 3;
-                                        Intwrite(fds[1 - fd], &move);                           // sending special code to identify player 2 win
+                                        Intwrite(fds[1 - fd], &move);                                                   // sending special code to identify player 2 win
                                         Intwrite(fds[fd], &move);
                                         close(fds[0]);
                                         close(fds[1]);
+
+                                        // updating score for player 2 in database
+                                        sprintf(sql, "UPDATE leaderboard SET score = (SELECT score FROM leaderboard WHERE username ='%s') + 1 WHERE username = '%s'", player_name[1], player_name[1]);
+                                        errCode = sqlite3_exec(db, sql, NULL, 0,&error);
+                                        if (errCode != SQLITE_OK) {
+                                            fprintf(stderr, "Failed to execute statement: %s\n", sqlite3_errmsg(db));
+                                            exit(2);
+                                        }
                                     }
                                     else {
 
-                                        UpdateBoard(board, curr_i, curr_j, dest_i, dest_j);                      // update the game state matrix
+                                        UpdateBoard(board, curr_i, curr_j, dest_i, dest_j);                             // update the game state matrix
                                         PrintBoard(board);
 
-                                        move = CodeMove(curr_i, curr_j, dest_i, dest_j);                        // creating 4 digit int from coordinates
-                                        Intwrite(fds[1 - fd], &move);                                          // sending move to opponent
+                                        move = CodeMove(curr_i, curr_j, dest_i, dest_j);                                // creating 4-digit int from coordinates
+                                        Intwrite(fds[1 - fd], &move);                                                   // sending move to opponent
                                     }
 
-                                } else {              // not a valid move
+                                } else {                                                                                // not a valid move
 
                                     move = 1;
-                                    Intwrite(fds[fd], &move);           // sending special code to client for identifying invalid moves
+                                    Intwrite(fds[fd], &move);                                                           // sending special code to client for identifying invalid moves
 
                                 }
                             }  // move else
@@ -453,13 +517,13 @@ int main ()
             }   // child if
         }
 
-        else {                                                    // if it's the second player to be assigned to a waiting player 1
+        else {                                                                                                          // if it's the second player to be assigned to a waiting player 1
             if (pid > 0) {
 
                 int player = 1;
 
-                Intwrite(client, &player);                      // letting the client know he's player 2
-                SendFd(UNIXsocket[1] , client);                 // send its fd to child
+                Intwrite(client, &player);                                                                              // letting the client know he's player 2
+                SendFd(UNIXsocket[1] , client);                                                                         // send its fd to child
             }
 
             while(waitpid(-1, NULL, WNOHANG) > 0 ){}
