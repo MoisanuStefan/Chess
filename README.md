@@ -1,7 +1,7 @@
 # ChessServer
-Concurrent server handles multiple chess games happening at the same time between any number of clients.
+Concurrent server handles multiple chess games happening at the same time between any number of clients.</br>
 There is no GUI as the target of the project was on establishing connections and managing processes.
 Run Instructions:</br>
--input: 1 - login
-        2 - new account
+- player id is required for keeping track of each score in the database</br>
+- after a oppoenent is connected, the game begins and moves are requested in format of 4 ints: source_line source_column destination_line destination_column</br.
 Project made for college subject Computer Networks (FII, year 2)
